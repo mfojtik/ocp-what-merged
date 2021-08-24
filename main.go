@@ -80,18 +80,19 @@ func getRepositoryChanges(client *github.Client, repository string, branchName s
 		Since: time.Now().Add(-since),
 	})
 	if err != nil {
-		return nil, err
+		log.Printf("[%s] %v", repository, err)
+		return []*github.RepositoryCommit{}, nil
 	}
 	return commits, nil
+}
+
+func isMergeCommit(commit *github.Commit) bool {
+	return strings.Contains(commit.GetMessage(), "Merge pull request")
 }
 
 func sanitizeMessage(msg string) string {
 	lines := strings.Split(msg, "\n")
 	var r []string
-	// remove merge pull message
-	if strings.Contains(lines[0], "Merge pull request") {
-		lines = lines[2:]
-	}
 	for _, l := range lines {
 		if strings.Contains(l, "Signed-off-by") || len(strings.TrimSpace(l)) == 0 {
 			continue
@@ -118,6 +119,9 @@ func processRepositories(client *github.Client, options ProcessOptions, reposito
 			}
 			var change []Change
 			for _, c := range result {
+				if isMergeCommit(c.GetCommit()) {
+					continue
+				}
 				change = append(change, Change{
 					repository:   *repository,
 					URL:          c.GetHTMLURL(),
