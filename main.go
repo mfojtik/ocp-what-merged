@@ -13,12 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xhit/go-str2duration/v2"
-
 	"github.com/dustin/go-humanize"
-
 	"github.com/google/go-github/github"
 	"github.com/lensesio/tableprinter"
+	"github.com/xhit/go-str2duration/v2"
 	"github.com/xxjwxc/gowp/workpool"
 	"golang.org/x/oauth2"
 )
@@ -69,15 +67,16 @@ func parseRepositoryOrgName(repository string) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
-func getRepositoryChanges(client *github.Client, repository string, branchName string, since time.Duration) ([]*github.RepositoryCommit, error) {
+func getRepositoryChanges(ctx context.Context, client *github.Client, repository string, options ProcessOptions) ([]*github.RepositoryCommit, error) {
 	organization, name, ok := parseRepositoryOrgName(repository)
 	if !ok {
 		return nil, fmt.Errorf("unable to parse repository organization or name: %q", repository)
 	}
 
-	commits, _, err := client.Repositories.ListCommits(context.TODO(), organization, name, &github.CommitsListOptions{
-		SHA:   branchName,
-		Since: time.Now().Add(-since),
+	commits, _, err := client.Repositories.ListCommits(ctx, organization, name, &github.CommitsListOptions{
+		SHA:   options.BranchName,
+		Since: time.Now().Add(-options.Since),
+		// TODO: If you want to add Until, this is the place.
 	})
 	if err != nil {
 		log.Printf("[%s] %v", repository, err)
@@ -86,6 +85,7 @@ func getRepositoryChanges(client *github.Client, repository string, branchName s
 	return commits, nil
 }
 
+// this is weak, but cheap and does not require extra request to GH API
 func isMergeCommit(commit *github.Commit) bool {
 	return strings.Contains(commit.GetMessage(), "Merge pull request")
 }
@@ -94,9 +94,11 @@ func sanitizeMessage(msg string) string {
 	lines := strings.Split(msg, "\n")
 	var r []string
 	for _, l := range lines {
+		// filter out signatures from commit messages
 		if strings.Contains(l, "Signed-off-by") || len(strings.TrimSpace(l)) == 0 {
 			continue
 		}
+		// trim the length of each line to 80 characters
 		if len(l) > 80 {
 			l = l[0:80] + " ..."
 		}
@@ -105,15 +107,16 @@ func sanitizeMessage(msg string) string {
 	return strings.Join(r, "\n")
 }
 
-func processRepositories(client *github.Client, options ProcessOptions, repositories []string) ([]Change, error) {
+func processRepositories(ctx context.Context, client *github.Client, options ProcessOptions, repositories []string) ([]Change, error) {
 	wp := workpool.New(options.Concurrency)
 	var changes []Change
 	var commitsLock sync.Mutex
 	var tasks []workpool.TaskHandler
+
 	for i := range repositories {
 		repository := &repositories[i]
 		tasks = append(tasks, func() error {
-			result, err := getRepositoryChanges(client, *repository, options.BranchName, options.Since)
+			result, err := getRepositoryChanges(ctx, client, *repository, options)
 			if err != nil {
 				return err
 			}
@@ -130,18 +133,23 @@ func processRepositories(client *github.Client, options ProcessOptions, reposito
 					originalTime: c.GetCommit().GetCommitter().GetDate(),
 				})
 			}
+
 			commitsLock.Lock()
 			defer commitsLock.Unlock()
 			changes = append(changes, change...)
 			return nil
 		})
 	}
+
+	// schedule all tasks, the work pool will take care of queuing
 	for i := range tasks {
 		wp.Do(tasks[i])
 	}
 	if err := wp.Wait(); err != nil {
 		return nil, err
 	}
+
+	// sort by time, from oldest to latest
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[j].originalTime.After(changes[i].originalTime)
 	})
@@ -215,13 +223,15 @@ func main() {
 		processOptions.BranchName = branch
 	}
 
+	ctx := context.Background()
+
 	repos, err := getRepositoriesFromPayload(payload)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("Processing %d repositories for commits in %s branch, since %s ...", len(repos), processOptions.BranchName, processOptions.Since)
-	changes, err := processRepositories(client, processOptions, repos)
+	changes, err := processRepositories(ctx, client, processOptions, repos)
 	if err != nil {
 		log.Fatal(err)
 	}
