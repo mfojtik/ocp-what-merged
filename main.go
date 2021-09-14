@@ -160,7 +160,7 @@ func getRepositoriesFromPayload(payload string) ([]string, error) {
 	cmd := exec.Command("sh", "-c", fmt.Sprintf("oc adm release info %s --commit-urls -o json", payload))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error extracting release information from oc: %w\noc output: %v", err, string(out))
 	}
 	var release Release
 	if err := json.Unmarshal(out, &release); err != nil {
