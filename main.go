@@ -2,16 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mfojtik/ocp-what-merged/pkg/release"
+
+	"github.com/openshift/library-go/pkg/image/reference"
 
 	"github.com/dustin/go-humanize"
 	"github.com/google/go-github/github"
@@ -20,25 +22,6 @@ import (
 	"github.com/xxjwxc/gowp/workpool"
 	"golang.org/x/oauth2"
 )
-
-const defaultPayload = "quay.io/openshift-release-dev/ocp-release:4.9.0-fc.0-x86_64"
-
-type Release struct {
-	Refs References `json:"references"`
-}
-
-type References struct {
-	Spec ReferencesSpec `json:"spec"`
-}
-
-type ReferencesSpec struct {
-	Tags []Tag `json:"tags"`
-}
-
-type Tag struct {
-	Name        string            `json:"name"`
-	Annotations map[string]string `json:"annotations"`
-}
 
 type Change struct {
 	URL     string `header:"URL"`
@@ -78,11 +61,11 @@ func getRepositoryChanges(ctx context.Context, client *github.Client, repository
 		Since: time.Now().Add(-options.Since),
 		// TODO: If you want to add Until, this is the place.
 	})
-	if err != nil {
-		log.Printf("[%s] %v", repository, err)
+	// skip repositories that does not exists in this payload... probably wrong combination of payload (--release) and branch name.
+	if err != nil && strings.Contains(err.Error(), "404 Not Found") {
 		return []*github.RepositoryCommit{}, nil
 	}
-	return commits, nil
+	return commits, err
 }
 
 // this is weak, but cheap and does not require extra request to GH API
@@ -156,49 +139,18 @@ func processRepositories(ctx context.Context, client *github.Client, options Pro
 	return changes, nil
 }
 
-func getRepositoriesFromPayload(payload string) ([]string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("oc adm release info %s --commit-urls -o json", payload))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("error extracting release information from oc: %w\noc output: %v", err, string(out))
-	}
-	var release Release
-	if err := json.Unmarshal(out, &release); err != nil {
-		return nil, err
-	}
-	var repositories []string
-	for _, t := range release.Refs.Spec.Tags {
-		sourceLocation, ok := t.Annotations["io.openshift.build.source-location"]
-		if !ok {
-			continue
-		}
-		if len(sourceLocation) == 0 {
-			continue
-		}
-		hasRepository := false
-		for _, r := range repositories {
-			if sourceLocation == r {
-				hasRepository = true
-				break
-			}
-		}
-		if !hasRepository {
-			repositories = append(repositories, sourceLocation)
-		}
-	}
-	return repositories, nil
-}
-
 func main() {
 	var (
-		since   string
-		branch  string
-		payload string
+		since      string
+		branch     string
+		releaseTag string
+		tags       bool
 	)
 
 	flag.StringVar(&since, "since", "1d", "Relative time to search the commits from (eg. '1d', '48h', ...)")
 	flag.StringVar(&branch, "branch", "master", "Branch name to use for search (eg. 'release-4.6', ...)")
-	flag.StringVar(&payload, "payload", defaultPayload, "Payload URL to use to determine list of repositories")
+	flag.StringVar(&releaseTag, "release", "", "Release tag to use instead of latest (--tags will list all available tags)")
+	flag.BoolVar(&tags, "tags", false, "List all available targetRelease tags")
 
 	flag.Parse()
 
@@ -225,12 +177,36 @@ func main() {
 
 	ctx := context.Background()
 
-	repos, err := getRepositoriesFromPayload(payload)
+	reposOptions, err := release.New(ctx)
+	if err != nil {
+		log.Fatalf("unable to get targetRelease payload image references: %v", err)
+	}
+
+	if tags {
+		tags, err := reposOptions.ListReleaseTags(ctx)
+		if err != nil {
+			log.Fatalf("unable to list release tags: %v", err)
+		}
+		fmt.Fprintf(os.Stdout, "%s", strings.Join(tags, ","))
+		os.Exit(0)
+	}
+
+	var targetRelease *reference.DockerImageReference
+	if len(releaseTag) > 0 {
+		targetRelease, err = reposOptions.GetReleaseTagReference(ctx, releaseTag)
+	} else {
+		targetRelease, err = reposOptions.GetLatestReleaseTag(ctx)
+	}
+	if err != nil {
+		log.Fatalf("unable to get targetRelease tag digest")
+	}
+
+	repos, err := reposOptions.GetPayloadRepositories(ctx, *targetRelease)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("Processing %d repositories for commits in %s branch, since %s ...", len(repos), processOptions.BranchName, processOptions.Since)
+	log.Printf("Processing %d repositories for commits in %s branch (payload:%s), since %s ...", len(repos), processOptions.BranchName, targetRelease.Registry+"/"+targetRelease.Namespace+"/"+targetRelease.Name+":"+targetRelease.Tag, processOptions.Since)
 	changes, err := processRepositories(ctx, client, processOptions, repos)
 	if err != nil {
 		log.Fatal(err)
