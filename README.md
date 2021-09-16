@@ -14,13 +14,14 @@ Before you use this tool, make sure you provide valid Github token via `GITHUB_T
 * `ocp-what-merged` - gives you list of changes that were merged to payload in last 24h
 * `ocp-what-merged -since 48h` - same, but for last 2 days
 * `ocp-what-merged -branch release-4.6` - changes for last 24h but in OpenShift 4.6 branch (z-stream)
-* `ocp-what-merged -payload quay.io/openshift-release-dev/ocp-release:custom` - if you for any reason need custom payload (because new repository was added?)
+* `ocp-what-merged -release 4.9.0-rc.1-x86_64` - override the release image tag to something custom (only use when you know what you are doing)
+* `ocp-what-merged -tags` - list the release image tags
 
 ### Example
 
 ```bash
 $ ocp-what-merged -since 40h
-2021/08/24 14:15:37 Processing 121 repositories for commits in master branch, since 40h0m0s ...
+2021/09/16 14:01:27 Processing 121 repositories for commits in release-4.8 branch (payload:quay.io/openshift-release-dev/ocp-release:4.9.0-rc.1-x86_64), since 24h0m0s ...
   URL (12)                                                                                                    MESSAGE                                                                                WHEN          
  ----------------------------------------------------------------------------------------------------------- -------------------------------------------------------------------------------------- -------------- 
   https://github.com/openshift/console/commit/276e9d485897af3d9ad28236635e94324e03336e                        fetch kamelets form both current namespace and global                                  1 day ago     
