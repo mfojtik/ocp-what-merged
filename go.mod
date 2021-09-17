@@ -16,6 +16,7 @@ require (
 	github.com/moby/sys/mount v0.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/runc v1.0.2 // indirect
+	github.com/openshift/build-machinery-go v0.0.0-20210806203541-4ea9b6da3a37
 	github.com/openshift/library-go v0.0.0-20210914071953-94a0fd1d5849
 	github.com/xhit/go-str2duration/v2 v2.0.0
 	github.com/xxjwxc/gowp v0.0.0-20210520113007-57eb4693b12d

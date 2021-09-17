@@ -40,15 +40,40 @@ func New(ctx context.Context) (*Options, error) {
 	}, nil
 }
 
-func (o *Options) ListReleaseTags(ctx context.Context) ([]string, error) {
+func FilterByArch(arch string) func(string) bool {
+	return func(s string) bool {
+		return strings.Contains(s, arch)
+	}
+}
+
+func FilterByPrefix(p string) func(string) bool {
+	return func(s string) bool {
+		return strings.HasPrefix(s, p)
+	}
+}
+
+func (o *Options) ListReleaseTags(ctx context.Context, filterFuncs ...func(string) bool) ([]string, error) {
 	tags, err := o.repository.Tags(ctx).All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(tags, func(i, j int) bool {
-		return tags[i] < tags[j]
+	result := []string{}
+	for i := range tags {
+		pass := true
+		for _, filter := range filterFuncs {
+			if !filter(tags[i]) {
+				pass = false
+			}
+		}
+		if !pass {
+			continue
+		}
+		result = append(result, tags[i])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i] < result[j]
 	})
-	return tags, nil
+	return result, nil
 }
 
 func (o *Options) GetReleaseTagReference(ctx context.Context, tagName string) (*imagereference.DockerImageReference, error) {
@@ -73,11 +98,14 @@ func (o *Options) GetLatestReleaseTag(ctx context.Context) (*imagereference.Dock
 	return o.GetReleaseTagReference(ctx, tags[len(tags)-1])
 }
 
+// GetPayloadRepositories return list of Github repositories that were used to construct this payload.
+// This is copied from `oc adm release` command and `oc image extract`, but minimized to only retrieve the data I need.
 func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference.DockerImageReference) ([]string, error) {
 	srcManifest, _, err := firstManifest(ctx, ref, o.repository, (&FilterOptions{DefaultOSFilter: true}).Include)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find manifest in %s: %v", ref, err)
 	}
+
 	manifest, ok := srcManifest.(*schema2.DeserializedManifest)
 	if !ok {
 		return nil, fmt.Errorf("manifest is not schema v2 manifest")
@@ -86,10 +114,11 @@ func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference
 	imageReferences := bytes.NewBuffer([]byte{})
 
 	for _, l := range manifest.Layers {
-		//  TODO: hack: skip layers that are large for release manifests to save time
+		// TODO: pro-hack: skip layers that are large for release manifests to save time
 		if l.Size > 10000000 {
 			continue
 		}
+		// get the container image blob for reading
 		r, err := o.repository.Blobs(ctx).Open(ctx, l.Digest)
 		if err != nil {
 			return nil, err
@@ -98,6 +127,8 @@ func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference
 		if err != nil {
 			return nil, err
 		}
+
+		// read the layer content
 		tr := tar.NewReader(rc)
 		for {
 			hdr, err := tr.Next()
@@ -107,9 +138,11 @@ func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference
 				}
 				return nil, err
 			}
+			// we only looking for 'image-references' file in the payload
 			if !strings.Contains(hdr.Name, "release-manifests/image-references") {
 				continue
 			}
+			// we got it, so read the file content
 			if _, err := io.Copy(imageReferences, tr); err != nil {
 				return nil, err
 			}
@@ -122,6 +155,7 @@ func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference
 		}
 	}
 
+	// stupid as it is, decode the OpenShift image stream into fake ImageStream object that only cares about annotations
 	var stream ImageStream
 	if err := json.Unmarshal(imageReferences.Bytes(), &stream); err != nil {
 		return nil, err
@@ -147,6 +181,7 @@ func (o *Options) GetPayloadRepositories(ctx context.Context, ref imagereference
 			result = append(result, source)
 		}
 	}
+
 	sort.Strings(result)
 	return result, nil
 }
