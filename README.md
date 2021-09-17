@@ -28,13 +28,22 @@ Alternatively, you can clone this repo and just run `make` to get the binary bui
 ### Example
 
 ```console
-$ ocp-what-merged -since 40h
-  URL (12)                                                                                                    MESSAGE                                                                                WHEN          
- ----------------------------------------------------------------------------------------------------------- -------------------------------------------------------------------------------------- -------------- 
-  https://github.com/openshift/console/commit/276e9d485897af3d9ad28236635e94324e03336e                        fetch kamelets form both current namespace and global                                  1 day ago     
-                                                                                                              ns where operator isinstal ...                                                                       
-  https://github.com/openshift/console/commit/1469b054a1ad1a967121bb8aab720ee28646860b                        show only route resource id sidepanel if route                                         1 day ago     
-                                                                                                              existis and show external url if ...                                                               
+$ ocp-what-merged -branch release-4.8 -release 4.8.9-x86_64 -since 8d
+  URL (5)                                                              MESSAGE                                                                  WHEN        
+ -------------------------------------------------------------------- ------------------------------------------------------------------------ ------------ 
+  https://github.com/openshift/machine-config-operator/commit/db21bb   Activate the default interface explicitly in configure-ovs.sh            1 week ago  
+                                                                       In some SDN migration case, the default interface cannot be activated                
+                                                                       automatically by 'nmcli con reload'. We activate it explicitly.                      
+                                                                       Also delete bridge br-ex and br-int created if exist, when running CNI               
+                                                                       is openshift-sdn.                                                                    
+                                                                       (cherry picked from commit 2e12d3e458e25375d111e654a387d1892294048a)                 
+  https://github.com/openshift/insights-operator/commit/ce9605         [release-4.8] Bug TBD: Gather installed PSP names                        1 week ago  
+                                                                       (#489) (#490)                                                                        
+  https://github.com/openshift/kubernetes/commit/4c16c3                Merge tag 'v1.21.4' into HEAD                                            6 days ago  
+                                                                       Kubernetes official release v1.21.4                                                  
+  https://github.com/openshift/kubernetes/commit/872ead                UPSTREAM: <drop>: manually resolve conflicts                             6 days ago  
+  https://github.com/openshift/kubernetes/commit/df3de0                UPSTREAM: <drop>: hack/update-vendor.sh, make update and                 6 days ago  
+                                                                       update image    
 ```
 
 ### Code of conduct
